@@ -49,10 +49,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - STORAGE_PATH=/app/storage/raw
       - KAFKA_BROKER=kafka:9092
-    volumes:
-      - ./storage:/app/storage
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
     depends_on:
       kafka:
         condition: service_started
@@ -62,15 +62,15 @@ services:
       context: ./worker-service
     container_name: worker-service
     environment:
-      - PROCESSED_PATH=/app/storage/processed
       - KAFKA_BROKER=kafka:9092
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
       - DB_PASS=postgres
       - DB_NAME=video_pipeline
-    volumes:
-      - ./storage:/app/storage
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
     depends_on:
       kafka:
         condition: service_started

@@ -1,85 +1,207 @@
-# Distributed Video Processing Pipeline (YouTube Style)
+# 🎥 Distributed Video Processing Pipeline (Cloud-Native, Event-Driven)
 
-This project implements an event-driven, microservices-based architecture for processing user-uploaded videos asynchronously. Instead of making the user wait for their video to be transcoded and stored, the pipeline offloads the heavy processing to background workers via Apache Kafka.
-
-## 🎯 Architecture & Workflow
-
-1. **Upload Service:** A lightweight Express.js API that accepts raw video files `(.mp4, .mov, etc.)` via `multer` from the user-facing web client. 
-2. **Event Queue (Apache Kafka):** Upon a successful upload, a Kafka Producer immediately publishes a `video_uploaded` event to the message broker.
-3. **Storage (Docker Volumes):** Raw videos are saved to a shared, persistent Docker volume (`./storage/raw`).
-4. **Worker Service:** A consumer application running built-in OS-level `ffmpeg` binds to Kafka. It receives the new file path, heavily transcodes the video into `360p` and `720p` variations, and slices a `.jpg` thumbnail.
-5. **Database (PostgreSQL):** Tracking video metadata and processing state securely.
+This project implements a **YouTube-style video processing pipeline** using a microservices architecture. It demonstrates how large video files can be processed asynchronously using event-driven design, without blocking user requests.
 
 ---
 
-## 🛠️ Technology Stack
+## 🚀 Architecture Overview
 
-- **Node.js & Express.js** (API and Worker code)
-- **Apache Kafka (KRaft)** (Event-driven message brokering, no Zookeeper)
-- **FFmpeg** (CLI engine mapping to `child_process` for video encoding)
-- **PostgreSQL** (Relational Database)
-- **Docker & Docker Compose** (Containerization and orchestration)
+```text
+Client
+  ↓
+Upload Service (Express + Multer)
+  ↓ (upload_large)
+Cloud Storage (Cloudinary)
+  ↓ (event: public_id)
+Apache Kafka
+  ↓
+Worker Service (FFmpeg)
+  ↓
+Cloudinary (processed outputs)
+```
 
 ---
 
-## 🚀 Getting Started (Docker Compose)
+## ⚙️ Workflow
 
-The easiest and only supported way to run this entire microservices architecture is through Docker Compose. We have perfectly wired up the internal DNS, network bindings, and volume mappings for you.
+1. **Upload Service**
 
-### Prerequisites
-- [Docker Engine & Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running on your machine.
-- Git.
+   * Accepts video via API (`POST /upload`)
+   * Uploads raw video to Cloudinary using `upload_large`
+   * Generates a unique `public_id` (`raw/<videoId>`)
+   * Publishes event to Kafka topic `video_uploaded`
 
-### 1. Clone the Repository
+2. **Event Queue – Apache Kafka**
+
+   * Decouples upload and processing
+   * Enables asynchronous, scalable processing
+   * Ensures reliable message delivery
+
+3. **Worker Service**
+
+   * Consumes Kafka events
+   * Downloads video from Cloudinary CDN
+   * Uses **FFmpeg** to:
+
+     * Generate `360p` video
+     * Generate `720p` video
+     * Extract thumbnail
+   * Uploads processed outputs back to Cloudinary:
+
+     ```
+     processed/<videoId>/360p
+     processed/<videoId>/720p
+     processed/<videoId>/thumbnail
+     ```
+
+4. **Storage Layer (Cloud-Based)**
+
+   * Raw and processed videos are stored in Cloudinary
+   * Accessible via secure CDN URLs
+
+5. **Database (Planned) – PostgreSQL**
+
+   * Included for tracking processing status
+   * Integration is scaffolded but not yet active 
+
+---
+
+## 🛠️ Tech Stack
+
+* **Node.js & Express.js** – API and worker services
+* **Apache Kafka (KRaft)** – Event streaming
+* **FFmpeg** – Video transcoding
+* **Cloudinary** – Cloud storage + CDN delivery
+* **PostgreSQL** – Metadata storage (planned)
+* **Docker & Docker Compose** – Containerization and orchestration
+
+---
+
+## 🧠 Key Design Principles
+
+* **Asynchronous Processing**
+  Upload returns instantly; processing happens in background
+
+* **Event-Driven Architecture**
+  Kafka decouples services and enables scalability
+
+* **Stateless Workers**
+  Workers download from cloud storage instead of shared disk
+
+* **Cloud-Native Storage**
+  Eliminates dependency on local volumes
+
+* **Horizontal Scalability**
+  Multiple workers can process videos in parallel
+
+---
+
+## ⚡ Getting Started
+
+### 1. Clone Repository
+
 ```bash
 git clone https://github.com/Nithin-26-dotcom/Video-processing-pipeline.git
 cd Video-processing-pipeline
 ```
 
-### 2. Build and Spin Up the Infrastructure
-Run the following single command from the root of the project. Docker will automatically pull the Kafka/Postgres images, build the Node.js containers (installing `ffmpeg` into the worker OS), and start everything on an isolated network.
+---
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the root:
+
+```env
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+```
+
+---
+
+### 3. Run with Docker
 
 ```bash
 docker-compose up -d --build
 ```
-> Note: `--build` is only strictly necessary on the first run or when you modify the Node.js code/configuration.
 
-### 3. Verify Services are Running
-To check that Kafka, Postgres, the Upload Service (Port 3000), and the Worker Service are all actively running without crashes:
-```bash
-docker-compose ps
+---
+
+### 4. Access Application
+
+👉 Open:
+
+```
+http://localhost:3000
 ```
 
-### 4. Try it Out!
-1. Open your browser and go to the frontend client at: 
-   👉 **`http://localhost:3000`**
-2. Choose a `.mp4` file from your device and click **Upload**.
-3. You will immediately get an `Upload successful` JSON response confirming the system received the Kafka event.
+Upload a video file.
 
-### 5. Watch the Magic Happen
-The moment you see "upload successful", your local `worker-service` container will start churning the video in the background.
+---
 
-To watch the live logs of FFmpeg extracting the thumbnails and compressing to 360p/720p:
+### 5. Monitor Processing
+
 ```bash
 docker-compose logs -f worker-service
 ```
 
-### 6. View the Final Results
-This setup uses Docker Volumes explicitly mapped to your host machine so you can easily access the outputs.
-Navigate to your project folder locally:
-- **`./storage/raw`:** This holds the original uploaded video.
-- **`./storage/processed/<uuid>`:** This will contain the generated `360p.mp4`, `720p.mp4`, and `thumbnail.jpg`!
+You will see:
+
+* Download from Cloudinary
+* FFmpeg transcoding
+* Upload of processed files
 
 ---
 
-## 🧹 Stopping and Cleaning Up
+## 📦 Output
 
-To gracefully stop all containers without destroying your generated data:
-```bash
-docker-compose down
+Processed assets are available via Cloudinary URLs:
+
+* `360p video`
+* `720p video`
+* `thumbnail`
+
+Example structure:
+
+```text
+processed/<videoId>/360p
+processed/<videoId>/720p
+processed/<videoId>/thumbnail
 ```
 
-If you ever wish to completely wipe the PostgreSQL database, Kafka events, and Docker networks to start fresh:
-```bash
-docker-compose down -v
-```
+---
+
+## 🧩 Current Limitations
+
+* PostgreSQL integration is scaffolded but not active
+* No API to query processing status
+* No retry/DLQ mechanism for failed jobs
+
+---
+
+## 🚀 Future Improvements
+
+* ✅ Enable PostgreSQL for status tracking
+* 🔄 Add `/video/:id/status` API
+* ⚡ Implement retry + dead-letter queue
+* 🎥 Support HLS/DASH streaming
+* 📈 Add monitoring & metrics
+
+---
+
+## 🏁 Summary
+
+This project demonstrates how real-world platforms like
+YouTube and Netflix handle large-scale video processing using:
+
+* Event-driven systems
+* Distributed workers
+* Cloud storage + CDN
+
+---
+
+## ⭐ Key Takeaway
+
+> Upload fast. Process asynchronously. Scale infinitely.
+
+---

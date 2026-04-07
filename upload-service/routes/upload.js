@@ -1,25 +1,11 @@
 import express from "express";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
-import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 import { Kafka } from "kafkajs";
+import cloudinary from "../cloudinary.js";
 
 const router = express.Router();
-
-// Resolve absolute path relative to this file
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const storagePath =
-  process.env.STORAGE_PATH ||
-  path.resolve(__dirname, "../../storage/raw");
-
-// Ensure folder exists
-if (!fs.existsSync(storagePath)) {
-  fs.mkdirSync(storagePath, { recursive: true });
-}
 
 // Kafka producer setup
 const kafka = new Kafka({
@@ -29,45 +15,37 @@ const kafka = new Kafka({
 
 const producer = kafka.producer();
 
-const connectProducer = async () => {
-  await producer.connect();
-  console.log("Kafka producer connected");
-};
-
-connectProducer().catch(console.error);
-
-// Multer storage config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, storagePath);
-  },
-  filename: (req, file, cb) => {
-    const videoId = uuidv4();
-    const ext = path.extname(file.originalname);
-    const filename = `${videoId}${ext}`;
-    req.videoId = videoId;
-    req.videoFilename = filename;
-    cb(null, filename);
-  },
-});
-
-console.log("Saving to:", storagePath);
-
-const upload = multer({ storage });
+// Temp Multer storage
+const upload = multer({ dest: "uploads/" });
 
 router.post("/", upload.single("video"), async (req, res) => {
   try {
+    const videoId = uuidv4();
+    const public_id = `raw/${videoId}`;
+
+    console.log("Uploading to Cloudinary...");
+    await cloudinary.uploader.upload_large(req.file.path, {
+      resource_type: "video",
+      public_id: public_id,
+    });
+
+    console.log("Upload complete, cleaning temp file...");
+    fs.unlinkSync(req.file.path);
+
     const event = {
-      videoId: req.videoId,
-      filePath: path.join(storagePath, req.videoFilename),  // ✅ real absolute path,
+      videoId: videoId,
+      public_id: public_id,
       uploadedAt: new Date().toISOString(),
     };
+
+    // Ensure producer is connected before sending (KafkaJS connect is idempotent)
+    await producer.connect();
 
     await producer.send({
       topic: "video_uploaded",
       messages: [
         {
-          key: req.videoId,         // keyed by videoId for partition ordering
+          key: videoId,
           value: JSON.stringify(event),
         },
       ],
@@ -77,12 +55,15 @@ router.post("/", upload.single("video"), async (req, res) => {
 
     res.json({
       message: "Upload successful",
-      videoId: req.videoId,
-      file: req.file.filename,
+      videoId: videoId,
+      public_id: public_id,
     });
   } catch (err) {
-    console.error("Failed to publish Kafka event:", err);
-    res.status(500).json({ error: "Upload succeeded but failed to queue for processing" });
+    console.error("Failed to process upload:", err);
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: "Upload failed" });
   }
 });
 

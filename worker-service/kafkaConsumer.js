@@ -1,6 +1,6 @@
 import { Kafka } from "kafkajs";
 import { processVideo } from "./ffmpegService.js";
-import { pool } from "./db.js";
+// import { pool } from "./db.js";
 
 const kafka = new Kafka({
   clientId: "worker-service",
@@ -23,7 +23,7 @@ export const startConsumer = async () => {
         return; // skip it
       }
 
-      const { videoId, filePath } = event;
+      const { videoId, public_id } = event;
 
       console.log("Processing video:", videoId);
 
@@ -33,7 +33,7 @@ export const startConsumer = async () => {
       // );
 
       try {
-        const outputs = await processVideo(videoId, filePath);
+        const outputs = await processVideo(videoId, public_id);
 
         // await pool.query(
         //   `UPDATE videos
